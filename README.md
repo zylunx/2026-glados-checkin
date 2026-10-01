@@ -1,5 +1,12 @@
 # 🎁 5 分钟配置 GLaDOS 自动签到
 
+> [!IMPORTANT]
+> **2026-09-30：新版认证修复已发布。** 维护者仓库已验证签到与 PushPlus 通知正常，[查看修复公告和实测记录](https://github.com/lankerr/2026-glados-checkin/releases/tag/v2026.9.30)。
+>
+> Fork 用户请先 **Sync fork → Update branch**。旧会话需要重新登录并更新 `GLADOS_COOKIE`（包含 `gld:sess` 与 `gld:sess.sig`），同时确认 `GLADOS_USER_AGENT` 与登录浏览器匹配。同步代码不会更新个人仓库的 Secrets 和 Variables；请手动运行一次验证自己的配置。
+>
+> 希望收到后续修复公告，可在原仓库选择 **Watch → Custom → Releases**。Fork 本身不代表订阅更新通知。
+
 <div align="center">
 
 **你不用写代码 · 不用买服务器 · 不用每天登录**
@@ -152,11 +159,36 @@ GLaDOS 在 2026 年初进行了 API 更新，**绝大多数旧签到脚本已失
 
 | 变量名               | 必填  | 说明                                                                       |
 | -------------------- | ----- | -------------------------------------------------------------------------- |
-| `GLADOS_COOKIE`      | ✅ 是 | GLaDOS 的 Cookie。多个账号请用 `&` 或换行符分隔。                          |
+| `GLADOS_COOKIE`      | ✅ 是 | GLaDOS 的完整 Cookie，必须包含 `gld:sess` 与 `gld:sess.sig`。多个账号请用 `&` 或换行符分隔。 |
+| `GLADOS_USER_AGENT`  | ❌ 否 | 生成当前 `gld:sess` 时浏览器的完整 User-Agent；新版设备校验失败时需要配置。 |
 | `PUSHPLUS_TOKEN`     | ❌ 否 | PushPlus 微信推送 Token。                                                  |
 | `TELEGRAM_BOT_TOKEN` | ❌ 否 | Telegram 机器人的 Token（例如 `123456:ABC-DEF1234...`）                    |
 | `TELEGRAM_CHAT_ID`   | ❌ 否 | 接收推送的 Telegram Chat ID                                                |
 | `PUSH_LEVEL`         | ❌ 否 | 推送级别：`fail_only`（默认，仅失败推送）或 `all`（每次均推送）            |
+| `EXCHANGE_PLAN`      | ❌ 否 | 积分自动兑换计划（#11）：`plan500`（默认，500 分自动兑换 100 天）、`plan200`（200 分→30 天）、`plan100`（100 分→10 天）或 `off`（关闭）。兑换结果即使 `PUSH_LEVEL=fail_only` 也会推送。 |
+
+### 🍪 2026 年 9 月新版会话 Cookie
+
+2026 年 9 月的新认证新增了 `gld:sess` 与 `gld:sess.sig`。旧的两项 `koa:sess`
+即使尚未过期，也可能只能维持网页兼容状态，调用新版 API 时会返回“没有权限”。请在
+Chrome 开发者工具的 **Network** 中选中一次成功的 `/api/user/status` 请求，从
+**Request Headers → Cookie** 复制完整值，并确认其中同时存在 `gld:sess` 和
+`gld:sess.sig`。`__stripe_mid` 属于支付组件 Cookie，不是签到认证的必要字段，保留也
+不会影响请求。请勿在 Issue、日志或聊天中公开任何 Cookie 内容。
+
+新版签到还会校验登录设备。若日志显示 `device-mismatch` 或 “Automated check-in
+detected”，请打开同一个浏览器的 `chrome://version`，复制“用户代理”完整内容，并在
+仓库 **Settings → Secrets and variables → Actions → Variables** 中设置
+`GLADOS_USER_AGENT`。浏览器升级后，应重新登录并同步更新 Cookie 与 User-Agent。
+
+### 🎁 积分自动兑换（#11）
+
+签到攒够积分后自动兑换会员天数，实现无感自动续期：
+
+- 每天签到后检查积分，达到阈值就自动调用 GLaDOS 兑换接口；
+- 默认 **500 分 → 100 天**（`plan500`），无需任何配置即可生效；
+- 想换别的档位或关闭，设置 `EXCHANGE_PLAN` 环境变量（GitHub 上可配在 **Settings → Secrets and variables → Actions → Variables**）；
+- 兑换成功或失败都会推送通知（积分不足时静默跳过，不打扰）。
 
 ---
 
@@ -232,47 +264,44 @@ GLaDOS 在 2026 年初进行了 API 更新，**绝大多数旧签到脚本已失
 
 > ⚠️ **注意**：GLaDOS 官网已迁移到 **[https://glados.cloud](https://glados.cloud)**，请使用新域名！
 
-#### 2.1 安装 Cookie 扩展
+#### 2.1 打开浏览器开发者工具
 
-在 **Edge 浏览器** 的扩展商店搜索 `Cookie-Editor`，安装 Cookie 管理扩展：
+推荐直接使用 Chrome/Edge 自带的开发者工具；也可以使用 Cookie-Editor：
 
 ![Cookie-Editor 扩展](images/cookie-extension.png)
 
-> 💡 **提示**：以下任意一个扩展都可以使用，只要能显示 `koa:sess` 和 `koa:sess.sig` 这两个 Cookie 就行！
+> 💡 **提示**：无论使用哪种方式，都必须取得新版的 `gld:sess` 和 `gld:sess.sig`，
+> 不能再只复制旧的两项 `koa:sess`。
 
 ![可选的 Cookie 扩展](images/cookie-alternative.png)
 
 #### 2.2 登录 GLaDOS 并获取 Cookie
 
-1. 打开 [https://glados.cloud](https://glados.cloud) 并登录
-2. 进入 **签到页面**（Console → Checkin）
-3. 点击浏览器右上角的 **Cookie-Editor** 扩展图标
-4. 找到并复制这两个值：
-   - `koa:sess` → 一串很长的字符串
-   - `koa:sess.sig` → 一串较短的字符串
+1. 打开 [https://glados.cloud](https://glados.cloud)，退出后重新登录；
+2. 进入 **签到页面**（Console → Checkin），按 `F12` 打开开发者工具；
+3. 选择 **Network**，刷新页面，点开一次成功的 `/api/user/status` 请求；
+4. 在 **Request Headers** 中找到 `Cookie`，右键复制它的完整值；
+5. 确认完整值中同时存在 `gld:sess=` 和 `gld:sess.sig=`。
 
 ![获取 Cookie](images/glados-cookies.png)
 
-#### 2.3 组合 Cookie（重要！）
+#### 2.3 Cookie 格式（重要！）
 
-将两个值按以下格式组合，**注意格式必须完全正确**：
-
-```text
-koa:sess=你的长字符串; koa:sess.sig=你的短字符串
-```
-
-**正确示例**：
+直接使用上一步复制的完整值。它通常包含新旧两组会话 Cookie，例如：
 
 ```text
-koa:sess=eyJ1c2VySWQiOjEyMzQ1Njc4OTB9; koa:sess.sig=abcdef123456
+koa:sess=旧会话; koa:sess.sig=旧签名; gld:sess=新会话; gld:sess.sig=新签名
 ```
+
+其他 Cookie 可以保留；`__stripe_mid` 与签到认证无关，但不会造成问题。
 
 **常见错误**：
 
-- ❌ 缺少分号 `;`
-- ❌ 缺少空格（分号后需要一个空格）
+- ❌ 仍然只复制 `koa:sess` 与 `koa:sess.sig`
+- ❌ 漏掉 `gld:sess.sig`
+- ❌ 把 `Cookie:` 之外的整段请求头一起复制
 - ❌ 值两边多了引号
-- ❌ 复制了多余的空格或换行
+- ❌ 将 Cookie 发布到 Issue、日志或聊天中
 
 #### 2.4 验证你的 Cookie 格式
 
@@ -280,17 +309,13 @@ koa:sess=eyJ1c2VySWQiOjEyMzQ1Njc4OTB9; koa:sess.sig=abcdef123456
 
 ```python
 # 将你的 Cookie 粘贴到下面的引号中
-cookie = "koa:sess=你的长字符串; koa:sess.sig=你的短字符串"
+cookie = "gld:sess=你的新会话; gld:sess.sig=你的新签名"
 
 # 验证
-if "koa:sess=" in cookie and "koa:sess.sig=" in cookie and "; " in cookie:
-    parts = cookie.split("; ")
-    if len(parts) == 2 and parts[0].startswith("koa:sess=") and parts[1].startswith("koa:sess.sig="):
-        print("✅ Cookie 格式正确！")
-    else:
-        print("❌ 格式错误，请检查分号和空格")
+if "gld:sess=" in cookie and "gld:sess.sig=" in cookie:
+    print("✅ 已包含新版会话 Cookie！")
 else:
-    print("❌ Cookie 缺少必要的字段")
+    print("❌ Cookie 缺少 gld:sess 或 gld:sess.sig")
 ```
 
 ---
@@ -463,7 +488,7 @@ pip install -r requirements.txt
 
 ```bash
 # 配置 Cookie
-export GLADOS_COOKIE="koa:sess=xxxxxx; koa:sess.sig=yyyyyy"
+export GLADOS_COOKIE="gld:sess=xxxxxx; gld:sess.sig=yyyyyy"
 
 # 可选：配置推送
 export PUSH_LEVEL="all"
@@ -479,7 +504,7 @@ python3 checkin.py
 通过 `crontab -e` 配置每天自动执行（例如每天早上 9:30）：
 
 ```bash
-30 9 * * * export GLADOS_COOKIE="koa:sess=xxx..."; cd /path/to/2026-glados-checkin && python3 checkin.py >> glados.log 2>&1
+30 9 * * * export GLADOS_COOKIE="gld:sess=xxx; gld:sess.sig=yyy"; cd /path/to/2026-glados-checkin && python3 checkin.py >> glados.log 2>&1
 ```
 
 ---
@@ -510,7 +535,7 @@ python3 checkin.py
           # 配置服务
           services.glados-checkin = {
             enable = true;
-            cookie = "koa:sess=xxx; koa:sess.sig=yyy";
+            cookie = "gld:sess=xxx; gld:sess.sig=yyy";
 
             # 【可选】消息推送配置
             pushLevel = "all"; # 或 "fail_only"
@@ -708,7 +733,29 @@ GitHub 的 schedule 不是实时调度器：高负载时可能延迟，极端情
 
 ---
 
+## 🙏 致谢
+
+感谢通过 Pull Request 改进本项目的贡献者。每一项修复和文档改进都让自动签到更可靠，也让新用户更容易完成配置。
+
+| 贡献者 | 贡献 | Pull Request |
+| --- | --- | --- |
+| [@badpinkman](https://github.com/badpinkman) | 适配新版 `gld:sess` 会话与浏览器设备校验，完善 Cookie 获取、User-Agent 配置和认证失败提示，并提供真实运行验证。 | [#18](https://github.com/lankerr/2026-glados-checkin/pull/18) |
+| [@Unexpectedlyc](https://github.com/Unexpectedlyc) | 调整 README 的部署顺序与说明，减少 GitHub Actions 和外部定时器配置带来的误解。 | [#5](https://github.com/lankerr/2026-glados-checkin/pull/5) |
+| [@Initsnow](https://github.com/Initsnow) | 添加 Telegram 推送、通知级别与 NixOS Flake 支持，并修复 Telegram 消息格式问题。 | [#3](https://github.com/lankerr/2026-glados-checkin/pull/3) |
+
+同时感谢 [@LxFairy](https://github.com/LxFairy) 提交上游同步与冲突处理 PR（[#8](https://github.com/lankerr/2026-glados-checkin/pull/8)、[#9](https://github.com/lankerr/2026-glados-checkin/pull/9)，未合并），以及在 Issues 中提供报错日志、排查线索和复测反馈的用户。
+
+特别感谢 @badpinkman 对 2026 年 9 月认证故障的排查与修复，帮助本项目恢复正常签到。
+
+---
+
 ## 📝 更新日志
+
+### 2026-09-30：新版会话与设备校验修复
+
+- 合并 [@badpinkman 的 PR #18](https://github.com/lankerr/2026-glados-checkin/pull/18)，适配 `gld:sess` / `gld:sess.sig` 和 `GLADOS_USER_AGENT`。
+- 旧会话导致的“没有权限”需要通过重新登录、更新完整 Cookie 解决；设备校验还要求 User-Agent 与生成会话的浏览器一致。Fork 同步代码不会自动更新个人仓库的 Secrets 和 Variables。
+- 维护者仓库在更新配置后完成真实验证：[首次签到成功](https://github.com/lankerr/2026-glados-checkin/actions/runs/36687039069)，[同日重复签到正常返回](https://github.com/lankerr/2026-glados-checkin/actions/runs/36708285323)。
 
 ### v1.2.0 (2026-08-05)
 
@@ -754,7 +801,7 @@ MIT
 
 **Made with ❤️ for GLaDOS users in 2026**
 
-**🔧 本项目最近一次维护验证：2026-08-05**
+**🔧 本项目最近一次维护验证：2026-09-30**
 
 **⭐ Star 一下，支持作者持续更新！⭐**
 
